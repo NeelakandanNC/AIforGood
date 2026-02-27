@@ -102,6 +102,8 @@ pip install fastapi uvicorn google-adk python-dotenv pydantic xgboost scikit-lea
 # Set environment variable
 echo "GOOGLE_API_KEY=your_key_here" > .env
 
+And enable Vertex AI API from Google Cloud Console
+
 # Start the server
 python server.py
 ```
