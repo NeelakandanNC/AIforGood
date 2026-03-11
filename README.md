@@ -92,12 +92,12 @@ pragyanxkanini/
 cd backend
 
 # Create and activate virtual environment
-python -m venv venv
+python -m venv venv or python3 -m venv venv
 source venv/bin/activate        # Linux/Mac
 venv\Scripts\activate           # Windows
 
 # Install dependencies
-pip install fastapi uvicorn google-adk python-dotenv pydantic xgboost scikit-learn
+pip install fastapi uvicorn google-adk python-dotenv pydantic xgboost scikit-learn pandas numpy
 
 # Set environment variable
 echo "GOOGLE_API_KEY=your_key_here" > .env
