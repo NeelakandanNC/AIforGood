@@ -1,7 +1,6 @@
 """
-TriageAI — Prediction Engine
-Takes patient JSON input → runs XGBoost model → returns full JSON with results.
-Place at: backend/model/predict.py
+TriageAI — Model Test
+Place at: backend/model/test.py
 """
 
 import pickle
@@ -14,23 +13,41 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(SCRIPT_DIR, "model.pkl")
 ENCODER_PATH = os.path.join(SCRIPT_DIR, "label_encoder.pkl")
 
-# Column order (must match training data)
+# ============================================================
+# FEATURES (MUST MATCH TRAINING)
+# ============================================================
+
 ALL_SYMPTOMS = [
-    "chest_pain", "breathlessness", "headache", "fever", "cough",
-    "abdominal_pain", "nausea", "vomiting", "dizziness", "fatigue",
-    "palpitations", "back_pain", "joint_pain", "diarrhea", "sore_throat",
-    "body_ache", "weakness", "blurred_vision", "numbness", "confusion",
-    "seizures", "blood_in_stool", "weight_loss", "sweating", "swelling",
-    "burning_urination", "rash", "cold", "wheezing", "loss_of_appetite"
+    "abdominal_pain", "anemia", "appetite_changes", "blurred_vision",
+    "body_ache", "bone_deformities", "breathlessness", "burning_urination",
+    "chest_pain", "chills", "cough", "cramps", "dehydration",
+    "delayed_growth", "diarrhea", "dizziness", "excessive_worry",
+    "fatigue", "fever", "frequent_infections", "headache", "irritability",
+    "joint_pain", "loss_of_appetite", "loss_of_interest",
+    "loss_of_smell_or_taste", "muscle_pain", "nausea", "numbness",
+    "pain_episodes", "pale_skin", "panic_attacks", "persistent_sadness",
+    "rash", "sleep_disturbance", "sore_throat", "sweating", "swelling",
+    "swollen_lymph_nodes", "vomiting", "weight_loss", "wheezing"
 ]
 
 ALL_CONDITIONS = [
-    "diabetes", "hypertension", "asthma", "copd", "heart_disease",
-    "kidney_disease", "liver_disease", "thyroid", "tuberculosis",
-    "cancer", "hiv", "anemia", "obesity"
+    "diabetes", "heart_disease", "hypertension", "kidney_disease", "obesity"
 ]
 
-# Load model once
+# Encoded mappings (LabelEncoder alphabetical order)
+GENDER_MAP        = {"Female": 0, "Male": 1, "Other": 2}
+REGION_MAP        = {"Central": 0, "East": 1, "North": 2, "Northeast": 3, "South": 4, "West": 5}
+URBAN_RURAL_MAP   = {"Rural": 0, "Semi-Urban": 1, "Urban": 2}
+SMOKING_MAP       = {"Current": 0, "Former": 1, "Never": 2}
+ALCOHOL_MAP       = {"Heavy": 0, "Never": 1, "Occasional": 2, "Regular": 3}
+DISEASE_CAT_MAP   = {
+    "Genetic": 0, "Infectious": 1, "Mental Health": 2,
+    "Non-Communicable": 3, "Respiratory": 4,
+    "Vector-Borne": 5, "Waterborne": 6
+}
+SEASON_MAP        = {"Monsoon": 0, "Post-Monsoon": 1, "Summer": 2, "Winter": 3}
+
+# Load model
 with open(MODEL_PATH, "rb") as f:
     model = pickle.load(f)
 with open(ENCODER_PATH, "rb") as f:
@@ -38,103 +55,75 @@ with open(ENCODER_PATH, "rb") as f:
 
 
 def predict(patient_json: dict) -> dict:
-    """
-    Takes patient input JSON, runs prediction, returns full output JSON.
 
-    Input format:
-    {
-        "patient_id": "PT-2026-00125",     # optional, auto-generated if missing
-        "name": "Ramanathan Iyer",          # optional
-        "age": 65,
-        "gender": "Male",                   # "Male" or "Female"
-        "symptoms": ["chest_pain", "breathlessness", "palpitations", "sweating"],
-        "bp_systolic": 175,
-        "bp_diastolic": 105,
-        "heart_rate": 110,
-        "temperature": 98.8,
-        "spo2": 93,
-        "conditions": ["diabetes", "hypertension"]   # or []
-    }
-    """
-
-    # --- Extract metadata ---
-    patient_id = patient_json.get("patient_id", f"PT-{datetime.now().strftime('%Y-%m%d%H%M%S')}")
+    patient_id = patient_json.get("patient_id", f"PT-{datetime.now().strftime('%Y%m%d%H%M%S')}")
     name = patient_json.get("name", "Unknown")
     now = datetime.now()
 
-    age = patient_json["age"]
-    gender_str = patient_json["gender"]
-    gender = 0 if gender_str.lower() == "male" else 1
-    symptoms = patient_json.get("symptoms", [])
+    symptoms   = patient_json.get("symptoms", [])
     conditions = patient_json.get("conditions", [])
 
-    # --- Build model input ---
-    model_row = {"age": age, "gender": gender}
-
-    for s in ALL_SYMPTOMS:
-        model_row[f"symptom_{s}"] = 1 if s in symptoms else 0
-
-    model_row["bp_systolic"] = patient_json["bp_systolic"]
-    model_row["bp_diastolic"] = patient_json["bp_diastolic"]
-    model_row["heart_rate"] = patient_json["heart_rate"]
-    model_row["temperature"] = patient_json["temperature"]
-    model_row["spo2"] = patient_json["spo2"]
-
-    for c in ALL_CONDITIONS:
-        model_row[f"condition_{c}"] = 1 if c in conditions else 0
-
-    model_row["has_pre_existing"] = 1 if len(conditions) > 0 else 0
-    model_row["num_symptoms"] = len(symptoms)
-    model_row["num_conditions"] = len(conditions)
-
-    # --- Predict ---
-    df = pd.DataFrame([model_row])
-    risk_code = model.predict(df)[0]
-    risk_label = le.inverse_transform([risk_code])[0]
-    probabilities = model.predict_proba(df)[0]
-    confidence = {cls: round(float(prob) * 100, 1) for cls, prob in zip(le.classes_, probabilities)}
-
-    # --- Build output JSON ---
-    output = {
-        "patient_id": patient_id,
-        "name": name,
-        "date": now.strftime("%Y-%m-%d"),
-        "time": now.strftime("%H:%M"),
-        "age": age,
-        "gender": gender_str,
+    # Build model input row
+    row = {
+        "age":             patient_json["age"],
+        "gender":          GENDER_MAP.get(patient_json["gender"], 1),
+        "region":          REGION_MAP.get(patient_json["region"], 0),
+        "urban_rural":     URBAN_RURAL_MAP.get(patient_json["urban_rural"], 2),
+        "disease_category": DISEASE_CAT_MAP.get(patient_json["disease_category"], 1),
+        "season":          SEASON_MAP.get(patient_json["season"], 0),
+        "smoking_status":  SMOKING_MAP.get(patient_json["smoking_status"], 2),
+        "alcohol_use":     ALCOHOL_MAP.get(patient_json["alcohol_use"], 1),
+        "bmi":             patient_json["bmi"],
     }
 
-    # Symptoms as true/false
     for s in ALL_SYMPTOMS:
-        output[f"symptom_{s}"] = s in symptoms
+        row[f"symptom_{s}"] = 1 if s in symptoms else 0
 
-    # Vitals
-    output["bp_systolic"] = patient_json["bp_systolic"]
-    output["bp_diastolic"] = patient_json["bp_diastolic"]
-    output["heart_rate"] = patient_json["heart_rate"]
-    output["temperature"] = patient_json["temperature"]
-    output["spo2"] = patient_json["spo2"]
+    row["num_symptoms"] = len(symptoms)
 
-    # Conditions as true/false
     for c in ALL_CONDITIONS:
-        output[f"condition_{c}"] = c in conditions
+        row[f"condition_{c}"] = 1 if c in conditions else 0
 
-    # Derived
-    output["has_pre_existing"] = len(conditions) > 0
-    output["num_symptoms"] = len(symptoms)
-    output["num_conditions"] = len(conditions)
+    row["has_pre_existing"] = 1 if len(conditions) > 0 else 0
+    row["num_conditions"]   = len(conditions)
 
-    # Result
-    output["result"] = {
-        "prediction": risk_label,
-        "confidence": {k: f"{v}%" for k, v in confidence.items()}
+    df = pd.DataFrame([row])
+
+    risk_code    = model.predict(df)[0]
+    risk_label   = le.inverse_transform([risk_code])[0]
+    probabilities = model.predict_proba(df)[0]
+    confidence   = {
+        cls: round(float(prob) * 100, 1)
+        for cls, prob in zip(le.classes_, probabilities)
+    }
+
+    output = {
+        "patient_id": patient_id,
+        "name":       name,
+        "date":       now.strftime("%Y-%m-%d"),
+        "time":       now.strftime("%H:%M"),
+        "age":        patient_json["age"],
+        "gender":     patient_json["gender"],
+        "region":     patient_json["region"],
+        "urban_rural": patient_json["urban_rural"],
+        "disease_category": patient_json["disease_category"],
+        "season":     patient_json["season"],
+        "smoking_status": patient_json["smoking_status"],
+        "alcohol_use": patient_json["alcohol_use"],
+        "bmi":        patient_json["bmi"],
+        "symptoms":   symptoms,
+        "conditions": conditions,
+        "result": {
+            "prediction": risk_label,
+            "confidence": {k: f"{v}%" for k, v in confidence.items()}
+        }
     }
 
     return output
 
 
 # ============================================================
-# TEST
+# TEST PATIENTS
 # ============================================================
 
 if __name__ == "__main__":
@@ -145,12 +134,14 @@ if __name__ == "__main__":
             "name": "Ramanathan Iyer",
             "age": 65,
             "gender": "Male",
-            "symptoms": ["chest_pain", "breathlessness", "palpitations", "sweating"],
-            "bp_systolic": 175,
-            "bp_diastolic": 105,
-            "heart_rate": 110,
-            "temperature": 98.8,
-            "spo2": 93,
+            "region": "South",
+            "urban_rural": "Urban",
+            "disease_category": "Non-Communicable",
+            "season": "Summer",
+            "smoking_status": "Former",
+            "alcohol_use": "Occasional",
+            "bmi": 28.5,
+            "symptoms": ["chest_pain", "breathlessness", "sweating", "dizziness"],
             "conditions": ["diabetes", "hypertension"]
         },
         {
@@ -158,12 +149,14 @@ if __name__ == "__main__":
             "name": "Priya Sharma",
             "age": 28,
             "gender": "Female",
-            "symptoms": ["cold", "cough", "sore_throat", "headache"],
-            "bp_systolic": 115,
-            "bp_diastolic": 75,
-            "heart_rate": 74,
-            "temperature": 99.2,
-            "spo2": 98,
+            "region": "North",
+            "urban_rural": "Urban",
+            "disease_category": "Infectious",
+            "season": "Winter",
+            "smoking_status": "Never",
+            "alcohol_use": "Never",
+            "bmi": 22.1,
+            "symptoms": ["fever", "cough", "sore_throat", "headache"],
             "conditions": []
         },
         {
@@ -171,29 +164,30 @@ if __name__ == "__main__":
             "name": "Lakshmi Devi",
             "age": 72,
             "gender": "Female",
-            "symptoms": ["dizziness", "weakness", "fatigue", "nausea"],
-            "bp_systolic": 155,
-            "bp_diastolic": 95,
-            "heart_rate": 95,
-            "temperature": 98.4,
-            "spo2": 94,
-            "conditions": ["diabetes", "hypertension"]
+            "region": "South",
+            "urban_rural": "Rural",
+            "disease_category": "Non-Communicable",
+            "season": "Post-Monsoon",
+            "smoking_status": "Never",
+            "alcohol_use": "Never",
+            "bmi": 31.2,
+            "symptoms": ["dizziness", "fatigue", "nausea", "blurred_vision"],
+            "conditions": ["diabetes", "hypertension", "kidney_disease"]
         }
     ]
 
     print("=" * 60)
-    print("🏥 TriageAI — Prediction Engine Test")
+    print("🏥 TriageAI — Model Test")
     print("=" * 60)
 
     for patient in test_patients:
         result = predict(patient)
-
         print(f"\n{'─' * 60}")
-        print(f"Patient: {result['name']} ({result['patient_id']})")
-        print(f"Age: {result['age']} | Gender: {result['gender']}")
-        print(f"🚦 Prediction: {result['result']['prediction']}")
-        print(f"📊 Confidence: {result['result']['confidence']}")
-        print(f"\n📄 Full JSON Output:")
+        print(f"Patient  : {result['name']} ({result['patient_id']})")
+        print(f"Age      : {result['age']} | Gender: {result['gender']}")
+        print(f"🚦 Prediction : {result['result']['prediction']}")
+        print(f"📊 Confidence : {result['result']['confidence']}")
+        print(f"\n📄 Full JSON:")
         print(json.dumps(result, indent=2))
 
     print(f"\n{'=' * 60}")
