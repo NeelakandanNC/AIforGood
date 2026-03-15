@@ -1,6 +1,6 @@
 """
 TriageAI — Synthetic Patient Data Generator (v2 - One-Hot Encoded)
-Generates 10,000 medically coherent patient records for Indian district hospital context.
+Generates 1,00,000 medically coherent patient records for Indian district hospital context.
 All symptoms and conditions are one-hot encoded for direct XGBoost training.
 """
 
@@ -13,7 +13,7 @@ import os
 np.random.seed(42)
 random.seed(42)
 
-NUM_PATIENTS = 10000
+NUM_PATIENTS = 100000
 
 # ============================================================
 # MEDICAL KNOWLEDGE BASE
